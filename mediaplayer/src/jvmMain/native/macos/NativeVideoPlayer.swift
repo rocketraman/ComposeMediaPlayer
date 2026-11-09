@@ -37,6 +37,10 @@ class MacVideoPlayer {
     private var nativeVideoWidth: Int = 0
     private var nativeVideoHeight: Int = 0
 
+    // True once the media has loaded without a video track (e.g. an .m4a or .mp3): it plays
+    // through an AVPlayer with no video output, and has no frame size.
+    private var isAudioOnly = false
+
     // Audio volume control (0.0 to 1.0)
     private var volume: Float = 1.0
 
@@ -690,6 +694,7 @@ class MacVideoPlayer {
     func openUri(_ uri: String) {
         isReadyForPlayback = false
         pendingPlay = false
+        isAudioOnly = false
 
         // Clean up previous observers
         cleanupObservers()
@@ -725,6 +730,12 @@ class MacVideoPlayer {
 
         // Retrieve the video track to obtain the actual dimensions
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
+            // Loaded fine but without a video track: audio-only media plays without a video output
+            if error == nil, let tracks = tracks, tracks.isEmpty, !isHLSStream {
+                isAudioOnly = true
+                setupVideoOutputAndPlayer(with: asset)
+                return
+            }
             guard let videoTrack = tracks?.first, error == nil else {
                 print(
                     "Error loading video tracks: \(error?.localizedDescription ?? "Unknown")"
@@ -853,7 +864,7 @@ class MacVideoPlayer {
             kCVPixelBufferHeightKey as String: frameHeight,
             kCVPixelBufferIOSurfacePropertiesKey as String: [:],
         ]
-        videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: pixelBufferAttributes)
+        videoOutput = isAudioOnly ? nil : AVPlayerItemVideoOutput(pixelBufferAttributes: pixelBufferAttributes)
 
         let item = AVPlayerItem(asset: asset)
 
@@ -1093,7 +1104,10 @@ class MacVideoPlayer {
         if isReadyForPlayback {
             isPlaying = true
             player?.play()
-            configureDisplayLink()
+            // audio-only media has no frames to capture, and no frame rate to time them by
+            if !isAudioOnly {
+                configureDisplayLink()
+            }
         } else {
             // Mark that playback is pending
             pendingPlay = true
@@ -1268,6 +1282,9 @@ class MacVideoPlayer {
 
     /// Returns true if this is an HLS stream
     func getIsHLSStream() -> Bool { return isHLSStream }
+
+    /// Returns true once the media has loaded without a video track
+    func getIsAudioOnly() -> Bool { return isAudioOnly }
 
     /// Returns available bitrates for HLS streams
     func getAvailableBitrates() -> [Float] { return availableBitrates }
@@ -1595,6 +1612,13 @@ public func consumeDidPlayToEnd(_ context: UnsafeMutableRawPointer?) -> Int32 {
 }
 
 // HLS-specific C exports
+@_cdecl("getIsAudioOnly")
+public func getIsAudioOnly(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.getIsAudioOnly() ? 1 : 0
+}
+
 @_cdecl("getIsHLSStream")
 public func getIsHLSStream(_ context: UnsafeMutableRawPointer?) -> Bool {
     guard let context = context else { return false }

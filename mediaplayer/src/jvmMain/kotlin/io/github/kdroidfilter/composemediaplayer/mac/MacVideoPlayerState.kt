@@ -418,7 +418,8 @@ class MacVideoPlayerState : VideoPlayerState {
                     try {
                         val w = MacNativeBridge.nGetFrameWidth(ptr)
                         val h = MacNativeBridge.nGetFrameHeight(ptr)
-                        if (w <= 0 || h <= 0) {
+                        val audioOnly = MacNativeBridge.nIsAudioOnly(ptr)
+                        if (!audioOnly && (w <= 0 || h <= 0)) {
                             setError("Failed to retrieve video size")
                             return@withLock
                         }
@@ -426,7 +427,7 @@ class MacVideoPlayerState : VideoPlayerState {
                         videoHeight = h
 
                         // Scale output to match the display surface (saves memory for 4K+ video).
-                        if (surfaceWidth > 0 && surfaceHeight > 0) {
+                        if (!audioOnly && surfaceWidth > 0 && surfaceHeight > 0) {
                             videoReaderMutex.withLock {
                                 MacNativeBridge.nSetOutputSize(ptr, surfaceWidth, surfaceHeight)
                                 val sw = MacNativeBridge.nGetFrameWidth(ptr)
@@ -482,8 +483,8 @@ class MacVideoPlayerState : VideoPlayerState {
     }
 
     /**
-     * Loops several times (every 250 ms) until width/height are no longer zero, or until
-     * [maxAttempts] is reached.
+     * Loops several times (every 250 ms) until width/height are no longer zero, the media turns
+     * out to have no video track, or [maxAttempts] is reached.
      */
     private suspend fun pollDimensionsUntilReady(
         ptr: Long,
@@ -494,6 +495,10 @@ class MacVideoPlayerState : VideoPlayerState {
             val height = MacNativeBridge.nGetFrameHeight(ptr)
             if (width > 0 && height > 0) {
                 macLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
+                return
+            }
+            if (MacNativeBridge.nIsAudioOnly(ptr)) {
+                macLogger.d { "Audio-only media, no dimensions to wait for (after $attempt attempts)" }
                 return
             }
             delay(250)

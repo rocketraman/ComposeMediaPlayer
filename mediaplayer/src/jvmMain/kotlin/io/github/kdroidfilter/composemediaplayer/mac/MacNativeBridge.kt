@@ -95,6 +95,9 @@ internal object MacNativeBridge {
 
     @JvmStatic external fun nGetAudioSampleRate(handle: Long): Int
 
+    /** True once the media has loaded without a video track; it then has no frame size. */
+    @JvmStatic external fun nIsAudioOnly(handle: Long): Boolean
+
     // Playback completion
     @JvmStatic external fun nConsumeDidPlayToEnd(handle: Long): Boolean
 }
